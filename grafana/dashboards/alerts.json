@@ -1,0 +1,160 @@
+{
+  "groups": [
+    {
+      "name": "field-sales-alerts",
+      "interval": "5m",
+      "rules": [
+        {
+          "alert": "HighSyncFailureRate",
+          "expr": "sum(rate(offline_sync_count{success='false'}[5m])) / sum(rate(offline_sync_count[5m])) > 0.05",
+          "for": "10m",
+          "labels": {
+            "severity": "critical",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "High offline sync failure rate",
+            "description": "Sync failures are exceeding 5% threshold (current: {{ $value | humanizePercentage }}). This affects rep productivity and data consistency.",
+            "dashboard": "mobile-health-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/sync-failures"
+          }
+        },
+        {
+          "alert": "APILatencySpikeP95",
+          "expr": "histogram_quantile(0.95, rate(api_latency_ms_bucket[5m])) > 2000",
+          "for": "5m",
+          "labels": {
+            "severity": "warning",
+            "team": "backend"
+          },
+          "annotations": {
+            "summary": "API latency p95 exceeds threshold",
+            "description": "95th percentile API latency is {{ $value | humanize }}ms (threshold: 2000ms). This may impact user experience.",
+            "dashboard": "mobile-health-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/high-latency"
+          }
+        },
+        {
+          "alert": "DataStalenessJDE",
+          "expr": "time() - jde_sync_last_successful_timestamp_seconds > 86400",
+          "for": "15m",
+          "labels": {
+            "severity": "warning",
+            "team": "integrations"
+          },
+          "annotations": {
+            "summary": "JDE sync data is stale",
+            "description": "JDE data hasn't been synced successfully in over 24 hours. Last sync was {{ $value | humanizeDuration }} ago.",
+            "dashboard": "business-metrics-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/jde-sync"
+          }
+        },
+        {
+          "alert": "LowAdoptionRate",
+          "expr": "sum(mobile_dau) / 500 < 0.5",
+          "for": "1h",
+          "labels": {
+            "severity": "warning",
+            "team": "product"
+          },
+          "annotations": {
+            "summary": "DAU below 50% of target",
+            "description": "Daily active users are {{ $value | humanizePercentage }} of target (500 users). Current DAU: {{ $value }}.",
+            "dashboard": "mobile-health-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/low-adoption"
+          }
+        },
+        {
+          "alert": "AppCrashRateHigh",
+          "expr": "sum(rate(app_crash_count[1h])) > 0.01",
+          "for": "10m",
+          "labels": {
+            "severity": "critical",
+            "team": "mobile"
+          },
+          "annotations": {
+            "summary": "High app crash rate detected",
+            "description": "App crash rate is {{ $value | humanizePercentage }} (1% threshold). This is impacting user experience.",
+            "dashboard": "mobile-health-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/app-crashes"
+          }
+        },
+        {
+          "alert": "LowCacheHitRate",
+          "expr": "sum(cache_hits) / (sum(cache_hits) + sum(cache_misses)) < 0.6",
+          "for": "30m",
+          "labels": {
+            "severity": "warning",
+            "team": "backend"
+          },
+          "annotations": {
+            "summary": "Cache hit rate below optimal threshold",
+            "description": "Cache hit rate is {{ $value | humanizePercentage }} (target: 80%+). This may increase backend load.",
+            "dashboard": "mobile-health-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/cache-hit-rate"
+          }
+        },
+        {
+          "alert": "QueueDepthCritical",
+          "expr": "sync_queue_depth > 1000",
+          "for": "10m",
+          "labels": {
+            "severity": "critical",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "Sync queue depth critically high",
+            "description": "Sync queue has {{ $value | humanize }} items pending (threshold: 1000). Processing is backed up.",
+            "dashboard": "mobile-health-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/queue-backlog"
+          }
+        },
+        {
+          "alert": "RevenueAnomalyDetection",
+          "expr": "abs((sum(increase(visit_revenue_total[1d])) - avg_over_time(sum(increase(visit_revenue_total[1d]))[30d])) / avg_over_time(sum(increase(visit_revenue_total[1d]))[30d])) > 0.25",
+          "for": "30m",
+          "labels": {
+            "severity": "warning",
+            "team": "business"
+          },
+          "annotations": {
+            "summary": "Unusual revenue pattern detected",
+            "description": "Daily revenue is {{ $value | humanizePercentage }} away from 30-day average. Current: {{ sum(increase(visit_revenue_total[1d])) | humanize }}.",
+            "dashboard": "business-metrics-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/revenue-anomaly"
+          }
+        },
+        {
+          "alert": "LowConversionRate",
+          "expr": "sum(tasks_completed_count) / sum(customer_interaction_count) < 0.15",
+          "for": "2h",
+          "labels": {
+            "severity": "warning",
+            "team": "sales"
+          },
+          "annotations": {
+            "summary": "Conversion rate below target",
+            "description": "Conversion rate is {{ $value | humanizePercentage }} (target: 20%+). Check training or process issues.",
+            "dashboard": "business-metrics-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/low-conversion"
+          }
+        },
+        {
+          "alert": "TaskCompletionLow",
+          "expr": "sum(tasks_completed_count) / sum(scheduled_tasks_count) < 0.7",
+          "for": "1h",
+          "labels": {
+            "severity": "warning",
+            "team": "operations"
+          },
+          "annotations": {
+            "summary": "Task completion rate below threshold",
+            "description": "Only {{ $value | humanizePercentage }} of tasks are being completed (target: 90%+).",
+            "dashboard": "business-metrics-dashboard",
+            "runbook": "https://wiki.company.com/field-sales/task-completion"
+          }
+        }
+      ]
+    }
+  ]
+}

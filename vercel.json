@@ -1,0 +1,31 @@
+{
+  "version": 2,
+  "public": false,
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": "dist",
+  "devCommand": "npm run dev",
+  "env": [
+    "SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "FASTAPI_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "SENTRY_DSN",
+    "AMPLITUDE_API_KEY"
+  ],
+  "functions": {
+    "backend/main.py": {
+      "runtime": "python3.11"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/v1/(.*)",
+      "destination": "backend/main.py"
+    }
+  ],
+  "regions": ["sfo1"],
+  "framework": "python-fastapi",
+  "skipAutoDetection": false
+}

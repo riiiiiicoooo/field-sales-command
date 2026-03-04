@@ -1,0 +1,166 @@
+# Field Sales Command - Cursor AI Rules
+
+## Project Context
+Field Sales Command is a React Native (Expo) mobile app enabling field sales representatives for a national home services company to access customer data, complete task checklists, track visits, and compete on leaderboards. The stack includes FastAPI backend, Supabase (PostgreSQL), Redis, Snowflake, and integrations with JDE ERP and Salesforce.
+
+## Architecture Principles
+
+### Mobile-First Design
+- Always prioritize mobile user experience (small screens, touch targets min 44x44pt)
+- Consider offline-first architecture: users may lose connectivity in rural service areas
+- AsyncStorage for local caching, Redux for state management
+- Optimize for 4G/LTE networks and accommodate 3G fallback scenarios
+
+### Offline-First Patterns
+- All critical user actions (task completion, visit tracking) must work offline
+- Queue manager persists actions to AsyncStorage, syncs when online
+- Background sync via native modules (react-native-background-fetch)
+- Use Supabase Realtime for eventual consistency when reconnecting
+- Display sync status indicators to users
+
+### React Native Conventions
+- Use functional components with hooks throughout
+- Structure: `app/(drawer)/(tabs)` for navigation with Expo Router
+- Component folders: `components/`, `screens/`, `hooks/`, `services/`
+- Redux store: `store/slices/` for domain slices (users, customers, tasks, etc.)
+- Services layer: `services/api.ts`, `services/sync.ts`, `services/gps.ts`
+- Avoid platform-specific code; use abstractions instead
+- Use `react-native-maps` with offline tile caching
+- Accessibility: Test with VoiceOver/TalkBack, use `accessible` prop
+
+### State Management (Redux)
+- Redux Toolkit for slices, createAsyncThunk for API calls
+- Middleware: RTK Query for API caching, custom offline middleware
+- Redux DevTools enabled in dev via `redux-devtools-extension`
+- Avoid local component useState for shared data (tasks, customers, leaderboards)
+- Middleware logs sync queue operations and API calls
+
+### FastAPI Backend Patterns
+- Use async/await throughout (async def handlers)
+- Structure: `backend/app/api/v1/routes/`, `backend/app/services/`, `backend/app/models/`
+- Pydantic models for request/response validation
+- Database: SQLAlchemy ORM with async session (sqlalchemy.ext.asyncio)
+- All endpoints require JWT authentication via dependency
+- Use service layer for business logic, routes delegate to services
+- Error handling: Custom exceptions with appropriate HTTP status codes
+- Logging: Structured JSON logs via Python logging + OpenTelemetry
+
+### Supabase & Row-Level Security
+- RLS policies enforce data isolation by division_id and role
+- Field reps: SELECT own division's customers/tasks, INSERT own visits
+- Directors: SELECT all divisions, UPDATE division tasks, INSERT announcements
+- Admins: Full access
+- Use auth.users() in RLS policies for JWT validation
+- Realtime subscriptions for task updates and visit tracking
+- pgvector extension reserved for future customer search improvements
+
+### Database Design
+- Tables: users, customers, tasks, visits, leaderboard, sync_queue, customer_data_sources
+- UUIDs (gen_random_uuid()) for all primary keys except sync_queue (auto-increment)
+- Timestamps: created_at (DEFAULT now()), updated_at (DEFAULT now())
+- Denormalization: leaderboard table pre-calculated for dashboard performance
+- Indexes on: division_id, user_id, customer_id, created_at (for time-series queries)
+- Multi-tenancy: division_id is implicit filter in all queries
+
+### Code Organization
+- `mobile/`: React Native app (src/screens, src/components, src/store, src/services)
+- `backend/`: FastAPI (app/api/v1, app/services, app/models, app/schemas)
+- `docs/`: PRD, architecture, data model, metrics, decision log, roadmap
+- `scripts/`: One-off utilities, data migrations, sync tests
+- Configuration: Use environment variables via python-dotenv (backend) and Expo env (mobile)
+
+### Testing & Quality
+- Mobile: Jest + React Native Testing Library (test component rendering, Redux)
+- Backend: pytest + pytest-asyncio for async tests, use test fixtures
+- E2E: Detox for mobile app flows
+- Minimum 70% coverage for critical paths (sync, authentication, calculations)
+- Format: Prettier (mobile), Black + isort (backend)
+- Linting: ESLint (mobile), flake8 + pylint (backend)
+
+### API Design
+- RESTful with /api/v1/ prefix
+- Standard HTTP methods and status codes
+- Responses: `{ success: boolean, data: T, error?: string, metadata?: {} }`
+- Pagination: `?page=1&limit=20` with `total_count` in metadata
+- Filtering: `?division_id=div123&status=active`
+- Rate limiting: 100 req/min per user via Redis
+- Versioning: v1, v2, etc. in URL path
+
+### Performance & Observability
+- OpenTelemetry: Instrument all API endpoints and database queries
+- Sentry for error tracking; source maps uploaded for React Native
+- Amplitude for product analytics (custom events for tasks, visits, leaderboard views)
+- Redis: Cache customer profiles (TTL 1 hour), leaderboard (TTL 5 min)
+- Mobile: Profile bundle size (target <50MB), lazy load screens
+- Database: Explain analyze queries >100ms, create indexes for common filters
+
+### Security
+- All endpoints authenticated (JWT from Supabase)
+- Environment secrets never in code; use .env files
+- SQL injection prevention: Use parameterized queries (SQLAlchemy)
+- CORS: Allow only trusted origins
+- Rate limiting on auth endpoints (5 attempts per minute)
+- Mobile: Keychain for token storage (react-native-keychain)
+- HTTPS enforced in production
+
+### Error Handling
+- Backend: Centralized exception handlers returning JSON with error codes
+- Mobile: Toast notifications for user-facing errors, silent logging for debug
+- Retry logic: Exponential backoff (1s, 2s, 4s, 8s max) for failed API calls
+- Graceful degradation: Show cached data if API unavailable
+
+### Git & Deployment
+- Branch strategy: main (production), develop (staging), feature/* (development)
+- Commits: Conventional commits (feat:, fix:, docs:, style:, test:, chore:)
+- PR reviews required before merge to main
+- CI/CD: GitHub Actions for tests and linting
+- Mobile: EAS Build for iOS/Android distribution
+- Backend: Docker deployment to cloud (AWS/GCP)
+
+### Documentation
+- README: Quick setup, key commands (make install, make dev), API docs link
+- Inline comments: Why decisions, not what code does
+- API: OpenAPI/Swagger docs auto-generated from FastAPI
+- ADRs: Record architectural decisions in docs/DECISION_LOG.md
+
+## Common Tasks
+
+### Add New API Endpoint
+1. Create Pydantic schema in `backend/app/schemas/`
+2. Implement service function in `backend/app/services/`
+3. Add route in `backend/app/api/v1/routes/`
+4. Add tests in `backend/tests/`
+5. Update OpenAPI docs if needed
+6. Test offline scenario if user-facing
+
+### Add New Mobile Screen
+1. Create component in `mobile/src/screens/`
+2. Add route to Expo Router in `mobile/app/`
+3. Create Redux slice if needed in `mobile/src/store/slices/`
+4. Connect to API service in `mobile/src/services/`
+5. Handle offline fallback (cached data)
+6. Add tests in `mobile/__tests__/screens/`
+
+### Integrate New Data Source (JDE, Salesforce, Snowflake)
+1. Create n8n workflow for sync (if applicable)
+2. Add sync service in `backend/app/services/sync/`
+3. Map to internal schema (customers, tasks, etc.)
+4. Add validation and error handling
+5. Queue sync operations with Trigger.dev
+6. Test with sample data; monitor sync latency
+
+### Debug Sync Issues
+1. Check `sync_queue` table for stuck records
+2. Review logs for n8n/Trigger.dev execution
+3. Verify API credentials and rate limits
+4. Test offline queue: toggle network in DevTools
+5. Use Redux DevTools to inspect state changes
+6. Correlate timestamps across services
+
+## Cursor-Specific Commands
+- Use @workspace to understand project structure
+- Use @codebase to search for patterns across files
+- Explain complex data flows (e.g., offline sync lifecycle)
+- Generate tests for critical functions
+- Suggest performance optimizations
+- Review security implications of new features

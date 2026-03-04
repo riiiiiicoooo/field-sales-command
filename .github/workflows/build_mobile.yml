@@ -1,0 +1,152 @@
+name: Build Mobile
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "mobile/**"
+      - ".github/workflows/build_mobile.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Authenticate with EAS
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          eas login --non-interactive
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Build iOS with EAS
+        working-directory: mobile
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        run: |
+          eas build --platform ios --non-interactive
+        timeout-minutes: 30
+
+      - name: Build Android with EAS
+        working-directory: mobile
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          eas build --platform android --non-interactive
+        timeout-minutes: 30
+
+      - name: Download iOS build artifact
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          eas build:list --limit 1 --json > build-info.json
+          BUILD_ID=$(jq -r '.[0].id' build-info.json)
+          eas buildinfo $BUILD_ID --json > ios-info.json
+
+      - name: Download Android build artifact
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+        run: |
+          eas build:list --platform android --limit 1 --json > android-info.json
+
+      - name: Upload iOS build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ios-build
+          path: ios-info.json
+          retention-days: 30
+
+      - name: Upload Android build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-build
+          path: android-info.json
+          retention-days: 30
+
+      - name: Create release notes
+        run: |
+          cat > RELEASE_NOTES.md << 'EOF'
+          # Mobile Build Release
+
+          ## iOS Build
+          - Build platform: iOS
+          - Build status: ${{ job.status }}
+
+          ## Android Build
+          - Build platform: Android
+          - Build status: ${{ job.status }}
+
+          ## Artifacts
+          - iOS artifact available in `ios-build` artifact
+          - Android artifact available in `android-build` artifact
+
+          Built at: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          Commit: ${{ github.sha }}
+          Branch: ${{ github.ref }}
+          EOF
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+          retention-days: 30
+
+      - name: Notify Slack on success
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "✅ Mobile build succeeded",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ Mobile Build Successful\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Branch:* ${{ github.ref }}\n*iOS*: Success\n*Android*: Success"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "❌ Mobile build failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "❌ Mobile Build Failed\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Branch:* ${{ github.ref }}\n*See logs:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|here>"
+                  }
+                }
+              ]
+            }

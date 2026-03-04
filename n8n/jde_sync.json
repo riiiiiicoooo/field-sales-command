@@ -1,0 +1,170 @@
+{
+  "name": "JDE Daily Customer Sync",
+  "description": "Daily JDE customer data sync at 6 AM. Queries JDE API and upserts to Supabase.",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": "At 6:00 AM every day"
+      },
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.JDE_API_URL }}/customers",
+        "authentication": "basicAuth",
+        "basicAuth": {
+          "user": "{{ $env.JDE_API_USER }}",
+          "password": "{{ $env.JDE_API_PASSWORD }}"
+        },
+        "queryParameters": "page=1&page_size=1000&include_service_history=true"
+      },
+      "name": "Fetch JDE Customers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 300],
+      "credentials": {
+        "basicAuth": "jde_creds"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Transform JDE data to match Supabase schema\nconst customers = $input.all();\nconst transformed = [];\n\nfor (const customer of customers) {\n  const item = customer.json.data || customer.json;\n  \n  transformed.push({\n    id: item.customer_id,\n    division_id: item.division_id,\n    name: item.customer_name,\n    phone: item.phone_number,\n    email: item.email_address,\n    address: item.street_address,\n    service_type: item.primary_service_type,\n    jde_account_id: item.account_id,\n    last_visit_date: item.last_service_date,\n    updated_at: new Date().toISOString()\n  });\n}\n\nreturn transformed;"
+      },
+      "name": "Transform to Supabase Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{ $env.SUPABASE_URL }}/rest/v1/customers",
+        "authentication": "customAuth",
+        "customAuth": {
+          "headers": {
+            "apikey": "{{ $env.SUPABASE_KEY }}",
+            "Authorization": "Bearer {{ $env.SUPABASE_KEY }}",
+            "Content-Type": "application/json"
+          }
+        },
+        "bodyParametersUi": "json",
+        "body": "{\n  \"upsert\": true,\n  \"data\": $json\n}",
+        "sendBody": true
+      },
+      "name": "Upsert to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "pass": "onError"
+        }
+      },
+      "name": "Error Occurred",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SLACK_WEBHOOK_URL }}",
+        "method": "POST",
+        "bodyParametersUi": "json",
+        "body": "{\n  \"text\": \"⚠️ JDE Sync Failed\",\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*JDE Daily Sync Failed*\\\\n_Time:_ {{ now.toISOString() }}\\\\n_Error:_ {{ $error.message }}\"\n      }\n    }\n  ]\n}",
+        "sendBody": true
+      },
+      "name": "Slack Alert on Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200],
+      "credentials": {
+        "httpBasicAuth": "slack_auth"
+      }
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SLACK_WEBHOOK_URL }}",
+        "method": "POST",
+        "bodyParametersUi": "json",
+        "body": "{\n  \"text\": \"✅ JDE Sync Completed\",\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*JDE Daily Sync Completed Successfully*\\\\n_Time:_ {{ now.toISOString() }}\\\\n_Records Synced:_ {{ $input.first().json.length }}\"\n      }\n    }\n  ]\n}",
+        "sendBody": true
+      },
+      "name": "Slack Notification Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 400],
+      "credentials": {
+        "httpBasicAuth": "slack_auth"
+      }
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch JDE Customers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch JDE Customers": {
+      "main": [
+        [
+          {
+            "node": "Transform to Supabase Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform to Supabase Schema": {
+      "main": [
+        [
+          {
+            "node": "Upsert to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Error Occurred",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Occurred": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert on Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Notification Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

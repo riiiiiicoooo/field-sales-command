@@ -1,0 +1,165 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "Dockerfile"
+      - "requirements.txt"
+      - ".github/workflows/deploy_backend.yml"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/backend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Create ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ecs-task-definition.json
+          container-name: field-sales-backend
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: field-sales-backend-service
+          cluster: field-sales-prod
+          wait-for-service-stability: true
+
+      - name: Update service with new image
+        run: |
+          aws ecs update-service \
+            --cluster field-sales-prod \
+            --service field-sales-backend-service \
+            --force-new-deployment \
+            --region us-east-1
+
+      - name: Wait for deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster field-sales-prod \
+            --services field-sales-backend-service \
+            --region us-east-1
+        timeout-minutes: 10
+
+      - name: Run smoke tests
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_KEY: ${{ secrets.API_KEY }}
+        run: |
+          chmod +x ./scripts/smoke-tests.sh
+          ./scripts/smoke-tests.sh
+
+      - name: Verify deployment
+        env:
+          API_URL: ${{ secrets.API_URL }}
+        run: |
+          HEALTH=$(curl -s $API_URL/health | jq -r '.status')
+          if [ "$HEALTH" != "healthy" ]; then
+            echo "Health check failed"
+            exit 1
+          fi
+
+      - name: Notify success
+        uses: slackapi/slack-github-action@v1
+        if: success()
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "✅ Backend deployment succeeded",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ Backend Deployed Successfully\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*Image:* ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\n*Cluster:* field-sales-prod"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify failure
+        uses: slackapi/slack-github-action@v1
+        if: failure()
+        with:
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "❌ Backend deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "❌ Backend Deployment Failed\n*Commit:* <${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\n*See logs:* <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|here>"
+                  }
+                }
+              ]
+            }
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Initiating rollback..."
+          aws ecs update-service \
+            --cluster field-sales-prod \
+            --service field-sales-backend-service \
+            --force-new-deployment \
+            --region us-east-1 \
+            || echo "Rollback completed"

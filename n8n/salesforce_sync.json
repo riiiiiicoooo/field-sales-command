@@ -1,0 +1,209 @@
+{
+  "name": "Salesforce Nightly Sync",
+  "description": "Nightly Salesforce lead/opportunity sync. OAuth → query SF → merge with customers → update SF fields.",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": "At 11:00 PM every day"
+      },
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SALESFORCE_INSTANCE_URL }}/services/oauth2/token",
+        "method": "POST",
+        "bodyParametersUi": "keyvalue",
+        "bodyParameters": [
+          {
+            "name": "grant_type",
+            "value": "client_credentials"
+          },
+          {
+            "name": "client_id",
+            "value": "{{ $env.SALESFORCE_CLIENT_ID }}"
+          },
+          {
+            "name": "client_secret",
+            "value": "{{ $env.SALESFORCE_CLIENT_SECRET }}"
+          }
+        ]
+      },
+      "name": "Get Salesforce OAuth Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SALESFORCE_INSTANCE_URL }}/services/data/v60.0/query",
+        "method": "GET",
+        "queryParameters": "q=SELECT Id, Email, Phone, FirstName, LastName, LeadScore, Status, CreatedDate FROM Lead WHERE CreatedDate = LAST_N_DAYS:1",
+        "headers": {
+          "Authorization": "Bearer {{ $node[\"Get Salesforce OAuth Token\"].json.access_token }}"
+        }
+      },
+      "name": "Fetch Salesforce Leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SALESFORCE_INSTANCE_URL }}/services/data/v60.0/query",
+        "method": "GET",
+        "queryParameters": "q=SELECT Id, AccountId, Name, StageName, Amount, CloseDate, CreatedDate FROM Opportunity WHERE CreatedDate = LAST_N_DAYS:1",
+        "headers": {
+          "Authorization": "Bearer {{ $node[\"Get Salesforce OAuth Token\"].json.access_token }}"
+        }
+      },
+      "name": "Fetch Salesforce Opportunities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge Salesforce leads with existing Supabase customers\nconst leads = $input.all()[0].json.records || [];\nconst merged = [];\n\nfor (const lead of leads) {\n  merged.push({\n    email: lead.Email,\n    phone: lead.Phone,\n    name: `${lead.FirstName} ${lead.LastName}`,\n    sf_lead_id: lead.Id,\n    lead_score: lead.LeadScore || 0,\n    status: lead.Status,\n    sf_last_updated: new Date().toISOString()\n  });\n}\n\nreturn merged;"
+      },
+      "name": "Transform Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 200]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SUPABASE_URL }}/rest/v1/rpc/merge_salesforce_leads",
+        "method": "POST",
+        "headers": {
+          "apikey": "{{ $env.SUPABASE_KEY }}",
+          "Authorization": "Bearer {{ $env.SUPABASE_KEY }}",
+          "Content-Type": "application/json"
+        },
+        "body": "{\n  \"p_leads\": $json\n}",
+        "sendBody": true
+      },
+      "name": "Merge with Supabase Customers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "pass": "onError"
+        }
+      },
+      "name": "Error Check",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SLACK_WEBHOOK_URL }}",
+        "method": "POST",
+        "body": "{\n  \"text\": \"⚠️ Salesforce Sync Failed\",\n  \"blocks\": [{\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"*Salesforce Sync Error*\\\\n_Error:_ {{ $error.message }}\"}}]\n}",
+        "sendBody": true
+      },
+      "name": "Slack Error Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SLACK_WEBHOOK_URL }}",
+        "method": "POST",
+        "body": "{\n  \"text\": \"✅ Salesforce Sync Completed\",\n  \"blocks\": [{\"type\": \"section\", \"text\": {\"type\": \"mrkdwn\", \"text\": \"*Salesforce Sync Success*\\\\n_Leads Synced:_ {{ $input.all().length }}\"}}]\n}",
+        "sendBody": true
+      },
+      "name": "Slack Success Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 400]
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Salesforce OAuth Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Salesforce OAuth Token": {
+      "main": [
+        [
+          {
+            "node": "Fetch Salesforce Leads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Salesforce Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Salesforce Leads": {
+      "main": [
+        [
+          {
+            "node": "Transform Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform Leads": {
+      "main": [
+        [
+          {
+            "node": "Merge with Supabase Customers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge with Supabase Customers": {
+      "main": [
+        [
+          {
+            "node": "Error Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Check": {
+      "main": [
+        [
+          {
+            "node": "Slack Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Success Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

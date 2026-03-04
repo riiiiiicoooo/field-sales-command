@@ -1,0 +1,57 @@
+{
+  "name": "Snowflake Analytics Sync",
+  "description": "After warehouse refresh, pull prediction scores (LTV, churn risk, upsell) → update customer records.",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": "At 3:00 AM every day"
+      },
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SNOWFLAKE_ACCOUNT }}.snowflakecomputing.com",
+        "user": "{{ $env.SNOWFLAKE_USER }}",
+        "password": "{{ $env.SNOWFLAKE_PASSWORD }}",
+        "database": "{{ $env.SNOWFLAKE_DATABASE }}",
+        "warehouse": "{{ $env.SNOWFLAKE_WAREHOUSE }}"
+      },
+      "name": "Connect Snowflake",
+      "type": "n8n-nodes-base.snowflake",
+      "typeVersion": 1,
+      "position": [300, 300],
+      "credentials": {
+        "snowflake": "snowflake_creds"
+      }
+    },
+    {
+      "parameters": {
+        "query": "SELECT\n  customer_id,\n  lifetime_value_prediction,\n  churn_risk_score,\n  upsell_likelihood_score,\n  updated_at\nFROM PREDICTIONS\nWHERE updated_at >= DATEADD(day, -1, CURRENT_TIMESTAMP())\nORDER BY updated_at DESC"
+      },
+      "name": "Fetch Prediction Scores",
+      "type": "n8n-nodes-base.snowflake",
+      "typeVersion": 1,
+      "position": [500, 300],
+      "credentials": {
+        "snowflake": "snowflake_creds"
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Transform Snowflake predictions for Supabase\nconst predictions = $input.all();\nconst transformed = [];\n\nfor (const pred of predictions) {\n  const item = pred.json;\n  transformed.push({\n    customer_id: item.CUSTOMER_ID,\n    predicted_ltv: parseFloat(item.LIFETIME_VALUE_PREDICTION || 0),\n    churn_risk: parseFloat(item.CHURN_RISK_SCORE || 0),\n    upsell_likelihood: parseFloat(item.UPSELL_LIKELIHOOD_SCORE || 0),\n    updated_at: new Date().toISOString()\n  });\n}\n\nreturn transformed;"
+      },
+      "name": "Transform Predictions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.SUPABASE_URL }}/rest/v1/rpc/update_customer_predictions",
+        "method": "POST",
+        "headers": {
+          "apikey": "{{ $env.SUPABASE_KEY }}",
+          "Authorization": \"Bearer {{ $env.SUPABASE_KEY }}\",\n          \"Content-Type\": \"application/json\"\n        },\n        \"body\": \"{\\n  \\\"p_predictions\\\": $json\\n}\",\n        \"sendBody\": true\n      },\n      \"name\": \"Update Customer Records\",\n      \"type\": \"n8n-nodes-base.httpRequest\",\n      \"typeVersion\": 4.2,\n      \"position\": [900, 300]\n    },\n    {\n      \"parameters\": {\n        \"conditions\": {\n          \"pass\": \"onError\"\n        }\n      },\n      \"name\": \"Error Handler\",\n      \"type\": \"n8n-nodes-base.switch\",\n      \"typeVersion\": 1,\n      \"position\": [1100, 300]\n    },\n    {\n      \"parameters\": {\n        \"url\": \"{{ $env.SLACK_WEBHOOK_URL }}\",\n        \"method\": \"POST\",\n        \"body\": \"{\\n  \\\"text\\\": \\\"⚠️ Snowflake Sync Failed\\\",\\n  \\\"blocks\\\": [{\\\"type\\\": \\\"section\\\", \\\"text\\\": {\\\"type\\\": \\\"mrkdwn\\\", \\\"text\\\": \\\"*Snowflake Predictions Sync Error*\\\\n_Error:_ {{ $error.message }}\\\"}}]\\n}\",\n        \"sendBody\": true\n      },\n      \"name\": \"Alert on Failure\",\n      \"type\": \"n8n-nodes-base.httpRequest\",\n      \"typeVersion\": 4.2,\n      \"position\": [1300, 200]\n    },\n    {\n      \"parameters\": {\n        \"url\": \"{{ $env.SLACK_WEBHOOK_URL }}\",\n        \"method\": \"POST\",\n        \"body\": \"{\\n  \\\"text\\\": \\\"✅ Snowflake Predictions Synced\\\",\\n  \\\"blocks\\\": [{\\\"type\\\": \\\"section\\\", \\\"text\\\": {\\\"type\\\": \\\"mrkdwn\\\", \\\"text\\\": \\\"*Predictions Updated Successfully*\\\\n_Records:_ {{ $input.all()[0].json.length }}\\\"}}]\\n}\",\n        \"sendBody\": true\n      },\n      \"name\": \"Alert on Success\",\n      \"type\": \"n8n-nodes-base.httpRequest\",\n      \"typeVersion\": 4.2,\n      \"position\": [1300, 400]\n    }\n  ],\n  \"connections\": {\n    \"Cron Trigger\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Connect Snowflake\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Connect Snowflake\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Fetch Prediction Scores\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Fetch Prediction Scores\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Transform Predictions\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Transform Predictions\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Update Customer Records\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Update Customer Records\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Error Handler\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Error Handler\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Alert on Failure\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ],\n        [\n          {\n            \"node\": \"Alert on Success\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    }\n  }\n}
