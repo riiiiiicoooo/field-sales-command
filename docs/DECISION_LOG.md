@@ -772,6 +772,38 @@ If Snowflake costs spike:
 
 ---
 
+## ADR-013: Simplified 3-Field Quick Capture Over Full CRM Sync
+
+**Date:** 2025-02-01
+**Status:** Accepted (supersedes initial design)
+**Deciders:** Product, Engineering, Division Presidents
+
+### Problem
+
+Initial design included full bidirectional CRM sync — reps could update all Salesforce fields from the mobile app (contact info, opportunity stage, notes, next steps, forecasting fields). This was the #1 feature request from division presidents.
+
+### What Happened
+
+Pilot Week 4 check-in revealed 23% of reps had stopped using the CRM sync entirely. Field observation showed reps opening the sync screen, seeing 12+ fields, and closing it to "do it later on desktop." Average CRM update time was 4.5 minutes per visit (vs. 2 minutes on desktop Salesforce). Reps said: "I already know how to do this in Salesforce. This is just a smaller screen version of the same thing."
+
+### Decision
+
+Stripped to 3-field quick capture: (1) Visit outcome (dropdown: Sold / Follow-up / Not Interested / Not Available), (2) Next action (free text, max 140 chars), (3) Follow-up date (date picker). Everything else syncs from Salesforce read-only.
+
+### Rationale
+
+3-field capture takes 15 seconds vs. 4.5 minutes. Reps will actually use it because it's faster than their current workflow (not slower). Salesforce remains the system of record for detailed updates — we're not replacing it, we're capturing the field signal that otherwise gets lost.
+
+### Consequences
+
+Division presidents initially pushed back ("we need all the fields"). Showed them the adoption data: 3-field capture adoption hit 91% by Week 8 vs. 23% for full sync. CRM data completeness actually improved because reps were logging visits they previously skipped entirely.
+
+### Lesson
+
+In field tools, less input = more data. A completed 3-field entry is infinitely more valuable than an abandoned 12-field form.
+
+---
+
 ## Summary: Key Trade-Offs
 
 | Decision | Trade-Off | Justification |
