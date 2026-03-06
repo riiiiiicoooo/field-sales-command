@@ -61,5 +61,4 @@ jobs:
         run: |
           pytest tests/backend/ \
             --verbose \
-            --tb=short \
-            || true
+            --tb=short

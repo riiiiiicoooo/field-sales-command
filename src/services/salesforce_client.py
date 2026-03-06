@@ -11,6 +11,24 @@ from src.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_soql_value(value: str) -> str:
+    """Sanitize a string value for safe inclusion in a SOQL query.
+
+    Escapes characters that have special meaning in SOQL string literals
+    to prevent SOQL injection attacks.
+
+    Args:
+        value: The raw user-supplied string.
+
+    Returns:
+        The escaped string safe for embedding inside single quotes in SOQL.
+    """
+    # Escape backslashes first, then single quotes
+    value = value.replace("\\", "\\\\")
+    value = value.replace("'", "\\'")
+    return value
+
+
 class SalesforceClient:
     """
     Salesforce REST API client.
@@ -83,7 +101,8 @@ class SalesforceClient:
         try:
             token = await self._get_access_token()
 
-            query = f"SELECT Id, Name, StageName, Amount, Probability, CloseDate FROM Opportunity WHERE AccountId = '{customer_id}' AND IsClosed = false"
+            safe_customer_id = _sanitize_soql_value(customer_id)
+            query = f"SELECT Id, Name, StageName, Amount, Probability, CloseDate FROM Opportunity WHERE AccountId = '{safe_customer_id}' AND IsClosed = false"
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(
@@ -138,9 +157,10 @@ class SalesforceClient:
 
             conditions = []
             if email:
-                conditions.append(f"Email = '{email}'")
+                conditions.append(f"Email = '{_sanitize_soql_value(email)}'")
             if phone:
-                conditions.append(f"Phone = '{phone}'")
+                conditions.append(f"Phone = '{_sanitize_soql_value(phone)}'")
+
 
             if not conditions:
                 return []
@@ -187,7 +207,8 @@ class SalesforceClient:
         try:
             token = await self._get_access_token()
 
-            query = f"SELECT Id, FirstName, LastName, Email, Phone, Title FROM Contact WHERE AccountId = '{account_id}'"
+            safe_account_id = _sanitize_soql_value(account_id)
+            query = f"SELECT Id, FirstName, LastName, Email, Phone, Title FROM Contact WHERE AccountId = '{safe_account_id}'"
 
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(

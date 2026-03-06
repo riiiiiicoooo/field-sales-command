@@ -12,6 +12,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.config import get_settings
 from src.api.v1 import auth, customers, tasks, visits, leaderboards, analytics, sync
 
+# ============================================================================
+# PRODUCTION NOTES
+# This is a portfolio demonstration. In a production deployment:
+# - Mobile app would use certificate pinning and encrypted offline storage
+#   (SQLCipher) instead of plain AsyncStorage for customer PII
+# - Auth tokens would use secure keychain storage (iOS Keychain / Android
+#   Keystore) with refresh token rotation on every use
+# - Salesforce/Snowflake credentials would be managed via OAuth 2.0 flows,
+#   not API keys, with token refresh handled by the backend
+# ============================================================================
+
 logger = logging.getLogger(__name__)
 
 

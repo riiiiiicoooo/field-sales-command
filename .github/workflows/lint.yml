@@ -28,14 +28,12 @@ jobs:
           pip install flake8 black isort
 
       - name: Run Black formatter check
-        run: black --check src/ || true
-
+        run: black --check src/
       - name: Run isort import sorter check
-        run: isort --check-only src/ || true
-
+        run: isort --check-only src/
       - name: Run flake8 linter
         run: |
           flake8 src/ \
             --max-line-length=100 \
             --extend-ignore=E203,W503,E501 \
-            --statistics || true
+            --statistics

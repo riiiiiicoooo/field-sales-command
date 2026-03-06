@@ -121,16 +121,16 @@ class SnowflakeClient:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            # Format IDs for SQL IN clause
-            ids_str = ",".join([f"'{cid}'" for cid in customer_ids])
+            # Use parameterized placeholders for SQL IN clause
+            placeholders = ", ".join(["%s"] * len(customer_ids))
 
             query = f"""
             SELECT customer_id, churn_risk_score
             FROM predictions
-            WHERE customer_id IN ({ids_str})
+            WHERE customer_id IN ({placeholders})
             """
 
-            cursor.execute(query)
+            cursor.execute(query, tuple(customer_ids))
             results = cursor.fetchall()
             cursor.close()
 
@@ -162,15 +162,15 @@ class SnowflakeClient:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            ids_str = ",".join([f"'{cid}'" for cid in customer_ids])
+            placeholders = ", ".join(["%s"] * len(customer_ids))
 
             query = f"""
             SELECT customer_id, lifetime_value_prediction
             FROM predictions
-            WHERE customer_id IN ({ids_str})
+            WHERE customer_id IN ({placeholders})
             """
 
-            cursor.execute(query)
+            cursor.execute(query, tuple(customer_ids))
             results = cursor.fetchall()
             cursor.close()
 
@@ -183,21 +183,35 @@ class SnowflakeClient:
             logger.error(f"Snowflake LTV fetch error: {e}")
             return {}
 
-    async def execute_query(self, query: str) -> List[Dict[str, Any]]:
+    # Allowed query prefixes to prevent arbitrary SQL execution
+    _ALLOWED_QUERY_PREFIXES = ("SELECT",)
+
+    async def execute_query(
+        self, query: str, params: Optional[tuple] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Execute custom analytics query.
+        Execute a parameterized read-only analytics query.
+
+        Only SELECT statements are allowed. All user-supplied values must be
+        passed via the ``params`` tuple using %%s placeholders in ``query``.
 
         Args:
-            query: SQL query to execute
+            query: SQL query with %%s placeholders for parameters
+            params: Tuple of parameter values (optional)
 
         Returns:
             Query results
         """
+        stripped = query.strip().upper()
+        if not any(stripped.startswith(prefix) for prefix in self._ALLOWED_QUERY_PREFIXES):
+            logger.error("Blocked disallowed query type (only SELECT is permitted)")
+            raise ValueError("Only SELECT queries are allowed through execute_query")
+
         try:
             conn = self._get_connection()
             cursor = conn.cursor(dictionary=True)
 
-            cursor.execute(query)
+            cursor.execute(query, params or ())
             results = cursor.fetchall()
             cursor.close()
 
