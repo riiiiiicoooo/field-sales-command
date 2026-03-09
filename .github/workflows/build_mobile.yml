@@ -71,14 +71,14 @@ jobs:
           eas build:list --platform android --limit 1 --json > android-info.json
 
       - name: Upload iOS build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ios-build
           path: ios-info.json
           retention-days: 30
 
       - name: Upload Android build artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: android-build
           path: android-info.json
@@ -107,17 +107,19 @@ jobs:
           EOF
 
       - name: Upload release notes
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release-notes
           path: RELEASE_NOTES.md
           retention-days: 30
 
       - name: Notify Slack on success
-        if: success()
-        uses: slackapi/slack-github-action@v1
+        if: success() && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.1
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "text": "✅ Mobile build succeeded",
@@ -133,10 +135,12 @@ jobs:
             }
 
       - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@v1
+        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.1
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "text": "❌ Mobile build failed",
