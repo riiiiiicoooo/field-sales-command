@@ -116,8 +116,9 @@ jobs:
           fi
 
       - name: Notify success
+        if: success()
+        continue-on-error: true
         uses: slackapi/slack-github-action@v1.27.1
-        if: success() && secrets.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
@@ -137,8 +138,9 @@ jobs:
             }
 
       - name: Notify failure
+        if: failure()
+        continue-on-error: true
         uses: slackapi/slack-github-action@v1.27.1
-        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
