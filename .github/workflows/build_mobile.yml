@@ -20,10 +20,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18.x"
-          cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Set up EAS CLI
         run: npm install -g eas-cli
@@ -119,8 +118,8 @@ jobs:
         uses: slackapi/slack-github-action@v1.27.1
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
-          webhook-type: incoming-webhook
           payload: |
             {
               "text": "✅ Mobile build succeeded",
@@ -141,8 +140,8 @@ jobs:
         uses: slackapi/slack-github-action@v1.27.1
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
         with:
-          webhook-type: incoming-webhook
           payload: |
             {
               "text": "❌ Mobile build failed",
