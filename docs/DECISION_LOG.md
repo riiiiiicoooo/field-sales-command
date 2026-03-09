@@ -760,6 +760,80 @@ If Snowflake costs spike:
 
 ---
 
+## ADR-014: Pivot from Online-First to Offline-First Architecture
+
+**Date:** 2025-02-10
+**Status:** Accepted (supersedes initial online-first approach)
+**Deciders:** Product, Engineering, Client (Field Reps)
+
+### Problem
+
+Initial design assumed reps would have reliable cellular connectivity in the field. The architecture was "online-first with offline fallback" — app worked great with cell service, cached data when offline, but required connectivity to submit work.
+
+Pilot Week 2 revealed a critical issue: Field observations in rural territories showed 23% of visits had zero connectivity during the visit window.
+
+**Example:** Rep arrives at a customer site in rural Georgia (no cell towers nearby). Customer uses the app to log a completed task. App says "connection unavailable, we'll sync when you regain service." Rep continues working without feedback.
+
+Problem: This created friction. Reps reported: "I want to complete my work and move on, not wait for syncing."
+
+### What Happened
+
+Riding along with field reps in rural areas (sparsely populated regions of 4 states) revealed the scope: **23% of visits happened in areas with zero connectivity during the visit itself.** Not occasional drops — entire visits where reps had no service.
+
+This invalidated the online-first architecture. The app needed to work completely offline, not as a fallback.
+
+### Decision
+
+Completely inverted the architecture to **offline-first with Redux-persisted local state and background sync.**
+
+**Implementation:**
+- All task data, visit logs, photos stored locally (AsyncStorage + Redux)
+- Submit button works instantly — doesn't require network
+- Redux middleware queues actions for sync when connectivity returns
+- Background sync job runs when device detects connectivity (WiFi or cellular)
+- Conflict resolution: last-write-wins with timestamp for duplicate submissions
+
+### Rationale
+
+1. **UX Paradigm Shift:** Offline-first means the app feels instant and responsive, regardless of connectivity. Reps can complete their workflow (enter visit notes, upload photo, log time) and move to the next job without waiting for a network round-trip.
+
+2. **Real-world Necessity:** 23% of visits (roughly 16-17 reps per day across 8 divisions) happen in no-service areas. An online-first app simply doesn't work for this use case.
+
+3. **Competitive Advantage:** Most field service apps (Salesforce on-the-go, Workday Field Service) require connectivity. Field Reps cited offline-first as "the feature that made me actually use this" in satisfaction surveys.
+
+4. **Sync Strategy:** Redux middleware handles queueing and retry logic automatically. When device regains connectivity (detected via platform-level network status), queued actions sync in batch. Typically re-sync happens within 5-10 minutes of regaining service.
+
+### Consequences
+
+**Short-term (Implementation):**
+- Added Redux-persist middleware (1 week)
+- Built offline sync queue + conflict resolution (2 weeks)
+- Added comprehensive offline/reconnect tests to all critical flows (1 week)
+- Complexity increased significantly — had to think through edge cases (what if sync fails mid-action? what if two devices update same record?)
+
+**Long-term (Operations):**
+- Sync queue metrics critical (need observability of "messages waiting to sync")
+- Backend must handle duplicate submissions gracefully (idempotency keys on all write operations)
+- Analytics became more complex (events happen offline and may not send for hours; must track based on local clock)
+
+**Product Impact:**
+- Field Rep satisfaction went from lukewarm (online-first felt clunky) to positive ("this actually works in the field")
+- Adoption metrics: offline-first drove adoption of mobile app from 52% to 87% of team (reps who previously preferred phone calls or paper)
+- Efficiency: Reps reported 1.5x faster workflow (no waiting for syncs)
+
+**Architecture Quality:**
+- Offline-first forced us to think about resilience and synchronization from day one, rather than bolting it on later
+- Redux devtools time-travel debugging became invaluable for tracking down sync edge cases
+- The architecture now naturally handles poor-connectivity scenarios (not just zero-connectivity)
+
+### Lesson
+
+"Work where your users work" — literally. We built the app for our desk, not for field conditions. The riding-along sessions (visiting actual work sites with reps) revealed that our assumptions were wrong. 23% zero-connectivity was a non-trivial percentage that invalidated the entire architecture direction.
+
+Offline-first added complexity (3-4 weeks of additional development) but was the right call because it matched the actual work environment. This became the most-cited feature in rep satisfaction surveys.
+
+---
+
 ## Superseded Decisions
 
 ### ADR-S001: Mobile Framework (Swift UI → React Native)
