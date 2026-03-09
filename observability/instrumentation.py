@@ -1,6 +1,10 @@
 """
 OpenTelemetry instrumentation setup for Field Sales Command FastAPI backend.
 Provides distributed tracing, metrics, and logging across the platform.
+
+Uses OTLP exporters exclusively (compatible with Grafana Cloud, Jaeger, Tempo,
+Datadog, and any OTLP-compatible backend). The deprecated Jaeger thrift exporter
+has been removed in favor of the vendor-neutral OTLP protocol.
 """
 
 import logging
@@ -10,7 +14,6 @@ from typing import Any, Callable, Dict, Optional
 
 from fastapi import FastAPI, Request
 from opentelemetry import metrics, trace
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
     OTLPMetricExporter,
 )
@@ -36,14 +39,10 @@ class TelemetryConfig:
         self,
         service_name: str = "field-sales-command",
         environment: str = "production",
-        jaeger_host: str = "localhost",
-        jaeger_port: int = 6831,
         otlp_endpoint: str = "http://localhost:4317",
     ):
         self.service_name = service_name
         self.environment = environment
-        self.jaeger_host = jaeger_host
-        self.jaeger_port = jaeger_port
         self.otlp_endpoint = otlp_endpoint
         self.resource = Resource.create(
             {
@@ -65,21 +64,13 @@ class FieldSalesTelemetry:
         self._setup_metrics()
 
     def _setup_tracing(self) -> None:
-        """Initialize distributed tracing with OTLP."""
+        """Initialize distributed tracing with OTLP exporter."""
         try:
-            # OTLP trace exporter (Grafana Cloud, Jaeger compatible)
             otlp_exporter = OTLPTraceExporter(
                 endpoint=self.config.otlp_endpoint,
                 insecure=True,
             )
 
-            # Fallback to Jaeger if OTLP unavailable
-            jaeger_exporter = JaegerExporter(
-                agent_host_name=self.config.jaeger_host,
-                agent_port=self.config.jaeger_port,
-            )
-
-            # Batch processor for better performance
             trace_provider = TracerProvider(resource=self.config.resource)
             trace_provider.add_span_processor(
                 BatchSpanProcessor(otlp_exporter)
@@ -92,9 +83,8 @@ class FieldSalesTelemetry:
             logger.error(f"Failed to initialize tracing: {e}")
 
     def _setup_metrics(self) -> None:
-        """Initialize metrics collection."""
+        """Initialize metrics collection with OTLP exporter."""
         try:
-            # OTLP metric exporter
             metric_exporter = OTLPMetricExporter(
                 endpoint=self.config.otlp_endpoint,
                 insecure=True,
@@ -130,6 +120,12 @@ class FieldSalesTelemetry:
             unit="ms",
         )
 
+        self.customer_aggregation_latency = self.meter.create_histogram(
+            name="customer_aggregation_latency_ms",
+            description="Customer data aggregation latency in milliseconds",
+            unit="ms",
+        )
+
         # Counters
         self.offline_sync_count = self.meter.create_counter(
             name="offline_sync_count",
@@ -154,6 +150,11 @@ class FieldSalesTelemetry:
         self.cache_misses = self.meter.create_counter(
             name="cache_misses",
             description="Number of cache misses",
+        )
+
+        self.conflict_resolution_count = self.meter.create_counter(
+            name="conflict_resolution_count",
+            description="Number of sync conflict resolutions",
         )
 
         # Gauges
@@ -204,7 +205,13 @@ class FieldSalesTelemetry:
     ) -> None:
         """Record offline sync operation metrics."""
         if self.meter:
-            self.offline_sync_count.add(1)
+            self.offline_sync_count.add(
+                1,
+                attributes={
+                    "success": str(success),
+                    "items_synced": str(items_synced),
+                },
+            )
             self.offline_sync_latency.record(
                 latency_ms,
                 attributes={
@@ -213,15 +220,23 @@ class FieldSalesTelemetry:
             )
 
     def record_customer_aggregation(
-        self, source_count: int, cache_hit: bool
+        self, source_count: int, cache_hit: bool, latency_ms: float = 0
     ) -> None:
         """Record customer aggregation operation."""
         if self.meter:
-            self.customer_aggregation_count.add(1)
+            self.customer_aggregation_count.add(
+                1,
+                attributes={
+                    "sources_available": str(source_count),
+                    "cache_hit": str(cache_hit),
+                },
+            )
             if cache_hit:
                 self.cache_hits.add(1)
             else:
                 self.cache_misses.add(1)
+            if latency_ms > 0:
+                self.customer_aggregation_latency.record(latency_ms)
 
     def record_visit_recording(
         self, division: str, duration_seconds: float
@@ -235,10 +250,18 @@ class FieldSalesTelemetry:
                 },
             )
 
-    def record_cache_hit_rate(self, hit_rate: float) -> None:
-        """Record overall cache hit rate."""
+    def record_conflict_resolution(
+        self, resolution: str, entity_type: str
+    ) -> None:
+        """Record conflict resolution metrics."""
         if self.meter:
-            pass  # Can implement gauge update here
+            self.conflict_resolution_count.add(
+                1,
+                attributes={
+                    "resolution": resolution,
+                    "entity_type": entity_type,
+                },
+            )
 
     def set_queue_depth(self, depth: int) -> None:
         """Update sync queue depth gauge."""

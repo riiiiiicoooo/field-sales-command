@@ -224,7 +224,7 @@ async function storeVisitEvent(visit: VisitData): Promise<void> {
       visit_id: visit.visitId,
       customer_id: visit.customerId,
       rep_id: visit.repId,
-      division,
+      division: visit.division,
       start_time: visit.startTime,
       end_time: visit.endTime,
       duration_minutes: Math.floor(
