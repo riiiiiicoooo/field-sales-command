@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import get_settings
 from src.api.v1 import auth, customers, tasks, visits, leaderboards, analytics, sync
+from src import db as database
 
 # ============================================================================
 # PRODUCTION NOTES
@@ -104,6 +105,19 @@ async def lifespan(app: FastAPI):
         logger.error(f"Configuration validation failed: {e}")
         raise
 
+    # Initialize database connections
+    try:
+        await database.init_redis()
+        logger.info("Redis initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Redis: {e}")
+
+    try:
+        database.init_snowflake_pool()
+        logger.info("Snowflake connection pool initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Snowflake pool: {e}")
+
     # Initialize OpenTelemetry if enabled
     if settings.OTEL_ENABLED:
         try:
@@ -116,6 +130,11 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Field Sales Command API")
+    try:
+        await database.shutdown()
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error during database shutdown: {e}")
 
 
 def _setup_opentelemetry(settings) -> None:
@@ -172,8 +191,24 @@ def create_app() -> FastAPI:
     async def readiness_check():
         """Readiness check endpoint."""
         try:
-            # Could add checks for database, Redis, etc.
-            return {"status": "ready"}
+            # Check database connectivity
+            redis_ok = await database.check_redis()
+            snowflake_ok = database.check_snowflake()
+
+            if not redis_ok:
+                logger.warning("Redis health check failed")
+
+            if not snowflake_ok:
+                logger.warning("Snowflake health check failed")
+
+            # Service is ready if at least one backend is available
+            if redis_ok or snowflake_ok:
+                return {"status": "ready"}
+            else:
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={"status": "not_ready", "error": "Database backends unavailable"},
+                )
         except Exception as e:
             logger.error(f"Readiness check failed: {e}")
             return JSONResponse(
